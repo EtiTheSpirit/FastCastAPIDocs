@@ -99,10 +99,10 @@ function FastCast.new()
 	
 	--Thanks to zoebasil for supplying the velocity and position functions below. (I've modified these functions)
 	--I was having a huge issue trying to get it to work and I had overcomplicated a bunch of stuff.
-	--GetPositionAtTime is used in physically simulated rays (Where Caster.HasPhysics == true).
+	--GetPositionAtTime is used in physically simulated rays (Where Caster.HasPhysics == true or the specific Fire has a specified acceleration).
 	--This returns the location that the bullet will be at when you specify the amount of time the bullet has existed, the original location of the bullet, and the velocity it was launched with.
 	local function GetPositionAtTime(Time, Origin, InitialVelocity, Acceleration)
-		local Gravity = Gravity * -1
+		local Gravity = Gravity * -1 --Stock gravity values are positive as they exclusively specify acceleration. This is made negative so that we know it's accelerating in the direction of -Y in studs/sec^2
 		local Force = Vector3.new((Acceleration.X * Time^2) / 2,(Acceleration.Y * Time^2) / 2, (Acceleration.Z * Time^2) / 2)
 		local GravForce = Vector3.new(0, (Gravity * (Time^2))/2, 0)
 		return Origin + (InitialVelocity * Time) + Force + GravForce
