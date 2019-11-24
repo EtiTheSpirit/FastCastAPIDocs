@@ -1,5 +1,5 @@
 --[[
-	FastCast Ver. 8.0.0
+	FastCast Ver. 8.1.0
 	Written by Eti the Spirit (18406183)
 	
 		The latest patch notes can be located here: https://github.com/XanTheDragon/FastCastAPIDocs/wiki/Changelist
@@ -70,29 +70,30 @@ end
 -----------------------------------------------------------
 
 -- Simple raycast alias
-local function Cast(origin, direction, ignoreDescendantsInstance)
+local function Cast(origin, direction, ignoreDescendantsInstance, ignoreWater)
 	local castRay = Ray.new(origin, direction)
-	return workspace:FindPartOnRay(castRay, ignoreDescendantsInstance)
+	return workspace:FindPartOnRay(castRay, ignoreDescendantsInstance, false, ignoreWater)
 end
 
 -- This function casts a ray with a whitelist.
-local function CastWithWhitelist(origin, direction, whitelist)
+local function CastWithWhitelist(origin, direction, whitelist, ignoreWater)
 	if not whitelist or typeof(whitelist) ~= "table" then
 		-- This array is faulty.
 		error("Call in CastWhitelist failed! Whitelist table is either nil, or is not actually a table.", 0)
 	end
 	local castRay = Ray.new(origin, direction)
-	return workspace:FindPartOnRayWithWhitelist(castRay, whitelist)
+	-- Now here's something bizarre: FindPartOnRay and FindPartOnRayWithIgnoreList have a "terrainCellsAreCubes" boolean before ignoreWater. FindPartOnRayWithWhitelist, on the other hand, does not!
+	return workspace:FindPartOnRayWithWhitelist(castRay, whitelist, ignoreWater)
 end
 
 -- This function casts a ray with a blacklist.
-local function CastWithBlacklist(origin, direction, blacklist)
+local function CastWithBlacklist(origin, direction, blacklist, ignoreWater)
 	if not blacklist or typeof(blacklist) ~= "table" then
 		-- This array is faulty
 		error("Call in CastBlacklist failed! Blacklist table is either nil, or is not actually a table.", 0)
 	end
 	local castRay = Ray.new(origin, direction)
-	return workspace:FindPartOnRayWithIgnoreList(castRay, blacklist)
+	return workspace:FindPartOnRayWithIgnoreList(castRay, blacklist, false, ignoreWater)
 end
 
 -- Thanks to zoebasil for supplying the velocity and position functions below. (I've modified these functions)
@@ -105,7 +106,7 @@ local function GetPositionAtTime(time, origin, initialVelocity, acceleration)
 end
 
 -- Simulate a raycast.
-local function SimulateCast(origin, direction, velocity, castFunction, lengthChangedEvent, rayHitEvent, cosmeticBulletObject, listOrIgnoreDescendantsInstance, bulletAcceleration)
+local function SimulateCast(origin, direction, velocity, castFunction, lengthChangedEvent, rayHitEvent, cosmeticBulletObject, listOrIgnoreDescendantsInstance, ignoreWater, bulletAcceleration)
 	if type(velocity) == "number" then
 		velocity = direction.Unit * velocity
 	end
@@ -132,7 +133,7 @@ local function SimulateCast(origin, direction, velocity, castFunction, lengthCha
 		local at = GetPositionAtTime(totalDelta, origin, initialVelocity, bulletAcceleration)
 		local displacement = (at - lastPoint)
 		local rayDir = displacement.Unit * velocity.Magnitude * delta
-		local hit, point, normal, material = castFunction(lastPoint, rayDir, listOrIgnoreDescendantsInstance)
+		local hit, point, normal, material = castFunction(lastPoint, rayDir, listOrIgnoreDescendantsInstance, ignoreWater)
 		
 		local rayDisplacement = displacement.Magnitude - (at - point).Magnitude
 		lengthChangedEvent:Fire(origin, lastPoint, rayDir.Unit, displacement.Magnitude, cosmeticBulletObject)
@@ -151,22 +152,17 @@ local function SimulateCast(origin, direction, velocity, castFunction, lengthCha
 	end)
 end
 
-function FastCast.new()
-	return setmetatable({
-		LengthChanged = Signal:CreateNewSignal(),
-		RayHit = Signal:CreateNewSignal()
-	}, FastCast)
-end
-
-local function BaseFireMethod(self, origin, directionWithMagnitude, velocity, cosmeticBulletObject, ignoreDescendantsInstance, bulletAcceleration, list, isWhitelist)
+local function BaseFireMethod(self, origin, directionWithMagnitude, velocity, cosmeticBulletObject, ignoreDescendantsInstance, ignoreWater, bulletAcceleration, list, isWhitelist)
 	MandateType(origin, "Vector3", "origin")
 	MandateType(directionWithMagnitude, "Vector3", "directionWithMagnitude")
 	assert(typeof(velocity) == "Vector3" or typeof(velocity) == "number", ERR_INVALID_TYPE:format("velocity", "Variant<Vector3, number>", typeof(velocity))) -- This one's an odd one out.
 	MandateType(cosmeticBulletObject, "Instance", "cosmeticBulletObject", true)
 	MandateType(ignoreDescendantsInstance, "Instance", "ignoreDescendantsInstance", true)
+	MandateType(ignoreWater, "boolean", true)
 	MandateType(bulletAcceleration, "Vector3", "bulletAcceleration", true)
 	MandateType(list, "table", "list", true)
-	-- isWhitelist is internal.
+	-- isWhitelist is strictly internal so it doesn't need to get sanity checked, because last I checked, I'm not insane c:
+	-- ... I hope
 	
 	local castFunction = Cast
 	local ignoreOrList = ignoreDescendantsInstance
@@ -178,22 +174,39 @@ local function BaseFireMethod(self, origin, directionWithMagnitude, velocity, co
 			castFunction = CastWithBlacklist
 		end
 	end
-	SimulateCast(origin, directionWithMagnitude, velocity, castFunction, self.LengthChanged, self.RayHit, cosmeticBulletObject, ignoreOrList, bulletAcceleration)
+	
+	SimulateCast(origin, directionWithMagnitude, velocity, castFunction, self.LengthChanged, self.RayHit, cosmeticBulletObject, ignoreOrList, ignoreWater, bulletAcceleration)
 end
 
-function FastCast:Fire(origin, directionWithMagnitude, velocity, cosmeticBulletObject, ignoreDescendantsInstance, bulletAcceleration)
+-----------------------------------------------------------
+------------------------- EXPORTS -------------------------
+-----------------------------------------------------------
+
+-- Constructor.
+function FastCast.new()
+	return setmetatable({
+		LengthChanged = Signal:CreateNewSignal(),
+		RayHit = Signal:CreateNewSignal()
+	}, FastCast)
+end
+
+-- Fire with stock ray
+function FastCast:Fire(origin, directionWithMagnitude, velocity, cosmeticBulletObject, ignoreDescendantsInstance, ignoreWater, bulletAcceleration)
 	assert(getmetatable(self) == FastCast, ERR_NOT_INSTANCE:format("Fire", "FastCast.new()"))
-	BaseFireMethod(self, origin, directionWithMagnitude, velocity, cosmeticBulletObject, ignoreDescendantsInstance, bulletAcceleration)
+	BaseFireMethod(self, origin, directionWithMagnitude, velocity, cosmeticBulletObject, ignoreDescendantsInstance, ignoreWater, bulletAcceleration)
 end
 
-function FastCast:FireWithWhitelist(origin, directionWithMagnitude, velocity, whitelist, cosmeticBulletObject, bulletAcceleration)
+-- Fire with whitelist
+function FastCast:FireWithWhitelist(origin, directionWithMagnitude, velocity, whitelist, cosmeticBulletObject, ignoreWater, bulletAcceleration)
 	assert(getmetatable(self) == FastCast, ERR_NOT_INSTANCE:format("FireWithWhitelist", "FastCast.new()"))
-	BaseFireMethod(self, origin, directionWithMagnitude, velocity, cosmeticBulletObject, nil, bulletAcceleration, whitelist, true)
+	BaseFireMethod(self, origin, directionWithMagnitude, velocity, cosmeticBulletObject, nil, ignoreWater, bulletAcceleration, whitelist, true)
 end
 
-function FastCast:FireWithBlacklist(origin, directionWithMagnitude, velocity, blacklist, cosmeticBulletObject, bulletAcceleration)
+-- Fire with blacklist
+function FastCast:FireWithBlacklist(origin, directionWithMagnitude, velocity, blacklist, cosmeticBulletObject, ignoreWater, bulletAcceleration)
 	assert(getmetatable(self) == FastCast, ERR_NOT_INSTANCE:format("FireWithBlacklist", "FastCast.new()"))
-	BaseFireMethod(self, origin, directionWithMagnitude, velocity, cosmeticBulletObject, nil, bulletAcceleration, blacklist, false)
+	BaseFireMethod(self, origin, directionWithMagnitude, velocity, cosmeticBulletObject, nil, ignoreWater, bulletAcceleration, blacklist, false)
 end
 
+-- Export
 return FastCast
